@@ -5,6 +5,15 @@ import main
 
 
 class RenewalResultTests(unittest.TestCase):
+    def test_login_failure_category(self):
+        class Browser:
+            @staticmethod
+            def get_text(_selector):
+                return "Invalid credentials"
+
+        with patch.object(main, "_read_alert", return_value=""):
+            self.assertEqual(main._login_failure_category(Browser()), "invalid_credentials")
+
     def test_explicit_success_is_true(self):
         with patch.object(main, "_read_alert", return_value="Server renewed successfully"), patch.object(
             main, "send_tg_message"

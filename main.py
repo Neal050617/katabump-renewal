@@ -433,7 +433,7 @@ def login(sb, email, password) -> bool:
     if cur_url.startswith(f"{BASE_URL}/dashboard") or "dashboard | katabump" in page_title.lower():
         print(f"✅ 登录成功！(Title: {page_title})")
         return True
-    print(f"❌ 登录失败，页面未跳转到账户页。(Title: {page_title})")
+    print(f"❌ 登录失败，页面未跳转到账户页。(category={_login_failure_category(sb)}, Title: {page_title})")
     sb.save_screenshot("login_failed.png")
     return False
 
@@ -443,6 +443,19 @@ def _read_alert(sb):
         return (el.text or "").strip()
     except Exception:
         return ""
+
+def _login_failure_category(sb):
+    try:
+        text = " ".join(filter(None, (_read_alert(sb), sb.get_text("body")[:4000]))).lower()
+    except Exception:
+        text = ""
+    if any(marker in text for marker in ("invalid credentials", "invalid password", "incorrect password", "wrong password")):
+        return "invalid_credentials"
+    if any(marker in text for marker in ("turnstile", "captcha", "verify you are human", "verification required")):
+        return "challenge_required"
+    if any(marker in text for marker in ("too many", "rate limit", "try again later")):
+        return "rate_limited"
+    return "unknown"
 
 def _goto_server_detail(sb) -> str:
     print("\n🖥️  正在进入服务器续期页...")
