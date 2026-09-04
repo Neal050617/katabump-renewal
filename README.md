@@ -1,6 +1,8 @@
 # Katabump-Renewal
 
-基于 GitHub Actions + SeleniumBase 的 Katabump 自动续期脚本，支持多账号、可选代理与 Telegram 通知。
+基于 GitHub Actions + SeleniumBase 的 Katabump 自动续期脚本，支持多账号、可选代理与 Telegram 通知。本 fork 移除了包含代理凭据的构建产物上传，锁定了运行依赖，并让无法确认的续期结果正确失败。
+
+> Cloudflare/Turnstile 由网站控制，脚本不保证验证码能够自动通过。连续失败时应人工登录确认，不要把成功的 Actions 运行等同于平台一定接受了续期；以页面明确的成功或未到期提示为准。
 
 ## 1. 仓库结构
 
@@ -91,11 +93,7 @@
 
 ### 步骤 5：查看结果与排错文件
 
-工作流会上传 `renew-artifacts`，常见文件包括：
-
-- `screenshots/` 与 `*.png`：页面截图
-- `singbox.log`：代理日志（启用代理时）
-- `config.json`：代理生成配置（启用代理时）
+安全加固版不上传截图、代理日志或 `config.json`，因为这些文件可能包含账号、服务器信息或代理凭据。排错只查看 Actions 中经过脱敏的摘要日志。
 
 ---
 
@@ -150,7 +148,7 @@ python3 /home/runner/work/Katabump-Renewal/Katabump-Renewal/proxy_handler.py
 ### Q2：代理启动失败或连通性失败
 
 - 检查 `PROXY_URL` 是否有效。
-- 在 Actions Artifact 中下载 `singbox.log` 查看失败原因。
+- 查看 Actions 中的脱敏摘要；安全加固版不会上传含代理信息的原始日志。
 
 ### Q3：没有收到 Telegram 通知
 

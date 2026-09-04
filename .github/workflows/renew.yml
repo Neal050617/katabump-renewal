@@ -9,15 +9,20 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: katabump-renewal
+  cancel-in-progress: false
+
 jobs:
   renew:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
@@ -25,8 +30,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb x11-utils xdotool scrot fonts-noto-cjk
-          pip install seleniumbase requests
+          pip install seleniumbase==4.53.7 requests==2.34.2
           seleniumbase install chromedriver
+
+      - name: Test renewal result handling
+        run: python -m unittest -v test_main.py
 
       - name: Start Proxy (sing-box)
         env:
@@ -36,9 +44,11 @@ jobs:
             echo "PROXY_URL not set, skipping sing-box setup."
             exit 0
           fi
-          SINGBOX_VER="1.13.16"
+          SINGBOX_VER="1.14.0"
+          SINGBOX_SHA256="2375de6999f4f56ab46b4fc5ddf26a6aba1d3e61a0f4e7ddec2f4690457d5f63"
           echo "Downloading sing-box v${SINGBOX_VER}..."
           wget -q "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VER}/sing-box-${SINGBOX_VER}-linux-amd64.tar.gz"
+          echo "${SINGBOX_SHA256}  sing-box-${SINGBOX_VER}-linux-amd64.tar.gz" | sha256sum --check --strict
           tar -xzf "sing-box-${SINGBOX_VER}-linux-amd64.tar.gz"
           mv "sing-box-${SINGBOX_VER}-linux-amd64/sing-box" ./sing-box
           chmod +x ./sing-box
@@ -46,9 +56,7 @@ jobs:
           python proxy_handler.py
           echo "Starting sing-box..."
           nohup ./sing-box run -c config.json > singbox.log 2>&1 &
-          sleep 24
-          echo "--- singbox.log ---"
-          cat singbox.log || true
+          sleep 5
           echo "--- health check ---"
           if ! pgrep -f "./sing-box" > /dev/null; then
             echo "❌ sing-box process not running"
@@ -56,14 +64,13 @@ jobs:
           fi
           echo "✅ sing-box process alive"
           echo "--- proxy connectivity test ---"
-          if ! curl -s -m 30 -x http://127.0.0.1:8080 https://api.ip.sb/ip; then
-            echo ""
+          if ! curl --silent --show-error --fail --max-time 30 \
+            --proxy http://127.0.0.1:8080 --output /dev/null \
+            https://www.gstatic.com/generate_204; then
             echo "❌ proxy connect FAILED — no reachable node in pool"
             exit 1
           else
-            echo ""
             echo "  <- proxy OK"
-            grep -iE "urltest|selected|node-" singbox.log | tail -5 || true
           fi
 
       - name: Run Renew Script
@@ -75,16 +82,5 @@ jobs:
           IS_PROXY: ${{ secrets.PROXY_URL != '' && 'true' || 'false' }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          NODE_ATTEMPTS: ${{ secrets.NODE_ATTEMPTS || '3' }}
         run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python3 main.py
-
-      - name: Upload Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: renew-artifacts
-          path: |
-            *.png
-            screenshots/
-            singbox.log
-            config.json
-          if-no-files-found: ignore

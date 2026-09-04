@@ -419,14 +419,13 @@ def main():
         "route": {"final": "proxy"},
     }
 
-    with open("config.json", "w") as f:
+    descriptor = os.open("config.json", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
 
-    server = outbound.get("server", "N/A")
-    port = outbound.get("server_port", "N/A")
     print(f"sing-box config.json generated.")
     print(f"  Inbound: http://{LISTEN_HOST}:{LISTEN_PORT}")
-    print(f"  Outbound: {outbound['type']} -> {server}:{port}")
+    print(f"  Outbound: {outbound['type']} -> configured")
 
 
 if __name__ == "__main__":

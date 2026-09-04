@@ -38,26 +38,26 @@ def load_accounts():
 ACCOUNTS = load_accounts()
 CURRENT_EMAIL = ""
 
+def masked_email(email):
+    if '@' in email:
+        name, domain = email.split('@', 1)
+        if len(name) > 4:
+            return f"{name[:2]}****{name[-2:]}@{domain}"
+        return f"{name[:1]}****@{domain}"
+    return (email[:2] + '****') if email else "未知"
+
 def send_tg_message(status_icon, status_text, time_left=""):
     if not TG_BOT_TOKEN or not TG_CHAT_ID:
         print("ℹ️ 未配置 TG_BOT_TOKEN 或 TG_CHAT_ID，跳过 Telegram 推送。")
         return
     local_time = time.gmtime(time.time() + 8 * 3600)
     current_time_str = time.strftime("%Y-%m-%d %H:%M:%S", local_time)
-    email = CURRENT_EMAIL
-    if '@' in email:
-        name, domain = email.split('@', 1)
-        if len(name) > 4:
-            masked_email = f"{name[:2]}****{name[-2:]}@{domain}"
-        else:
-            masked_email = f"{name}@{domain}"
-    else:
-        masked_email = (email[:2] + '****') if email else "未知"
+    account_label = masked_email(CURRENT_EMAIL)
     detail = (time_left or "").strip()
     text = (
         f"🇫🇷 katabump 续期通知\n\n"
         f"{status_icon} {status_text}\n"
-        f"👤 续期账户: {masked_email}\n"
+        f"👤 续期账户: {account_label}\n"
         f"⏱️ 续期时间: {current_time_str}"
     )
     if detail:
@@ -224,16 +224,7 @@ def _restart_proxy():
     finally:
         log.close()
     time.sleep(26)
-    try:
-        with open("singbox.log", "rb") as f:
-            lines = f.read().decode("utf-8", "ignore").splitlines()
-        shown = 0
-        for ln in lines[-40:]:
-            if ("urltest" in ln or "selected" in ln or "node-" in ln) and shown < 5:
-                print("   sing-box:", ln.strip())
-                shown += 1
-    except Exception:
-        pass
+    print("  代理进程已重启；详细日志不输出到 Actions")
 
 def _switch_to_turnstile_frame(sb):
     try:
@@ -394,7 +385,7 @@ def login(sb, email, password) -> bool:
             sb.wait_for_element('input[name="Email"]', timeout=5)
         except Exception:
             print("❌ 页面未加载出登录表单")
-            print(f"  当前 URL: {sb.get_current_url()}")
+            print("  登录表单未出现")
             print(f"  当前标题: {sb.get_title() or ''}")
             sb.save_screenshot("login_load_fail.png")
             return False
@@ -440,9 +431,9 @@ def login(sb, email, password) -> bool:
     cur_url = sb.get_current_url().split('?')[0].lower()
     page_title = sb.get_title() or ""
     if cur_url.startswith(f"{BASE_URL}/dashboard") or "dashboard | katabump" in page_title.lower():
-        print(f"✅ 登录成功！(URL: {sb.get_current_url()}, Title: {page_title})")
+        print(f"✅ 登录成功！(Title: {page_title})")
         return True
-    print(f"❌ 登录失败，页面未跳转到账户页。(URL: {sb.get_current_url()}, Title: {page_title})")
+    print(f"❌ 登录失败，页面未跳转到账户页。(Title: {page_title})")
     sb.save_screenshot("login_failed.png")
     return False
 
@@ -453,26 +444,26 @@ def _read_alert(sb):
     except Exception:
         return ""
 
-def _goto_server_detail(sb) -> bool:
+def _goto_server_detail(sb) -> str:
     print("\n🖥️  正在进入服务器续期页...")
     time.sleep(5)
     alert_text = _read_alert(sb)
     if alert_text and "can't renew" in alert_text.lower():
         print(f"ℹ️  页面顶部提示: {alert_text}")
         send_tg_message("ℹ️", "⚠️ 未到续期时间", alert_text)
-        return False
+        return "not_due"
     see_link = None
     try:
         see_link = sb.find_element('a[href*="/servers/edit?id="]', timeout=10)
-        print(f"✅ 找到链接: {see_link.get_attribute('href')}")
+        print("✅ 找到服务器续期入口")
     except Exception:
         print("❌ 未找到 /servers/edit?id= 链接")
         sb.save_screenshot("servers_page_fail.png")
-        return False
+        return "error"
     see_link.click()
     time.sleep(5)
-    print(f"📄 当前页面: {sb.get_current_url()}")
-    return True
+    print("📄 已进入服务器续期页")
+    return "ready"
 
 def _open_renew_modal(sb) -> bool:
     print("\n🔄 查找 Renew 按钮...")
@@ -555,7 +546,7 @@ def _confirm_second_renew(sb):
     print("⏳ 等待 30 秒（被动 ALTCHA 自动验证中）...")
     time.sleep(30)
 
-def _check_renew_result(sb):
+def _check_renew_result(sb) -> bool:
     print("\n📋 检查续期结果...")
     alert_text = _read_alert(sb)
     if not alert_text:
@@ -566,25 +557,32 @@ def _check_renew_result(sb):
         low = alert_text.lower()
         if "can't renew" in low or "unable" in low:
             send_tg_message("⏳", "未到续期时间", alert_text)
+            return True
         elif any(kw in low for kw in ("renewed", "success", "extended")):
             send_tg_message("✅", "续期成功", alert_text)
+            return True
         else:
             send_tg_message("ℹ️", "续期操作已执行", alert_text)
+            return False
     else:
         print("ℹ️ 未检测到明确的提示框，可能续期操作未生效")
-        send_tg_message("ℹ️", "续期操作已执行", "未检测到明确提示")
+        send_tg_message("⚠️", "无法确认续期成功", "未检测到明确提示")
+        return False
 
-def renew_server(sb):
+def renew_server(sb) -> bool:
     print("\n" + "#" * 25)
     print("  开始自动续期流程")
     print("#" * 25)
-    if not _goto_server_detail(sb):
-        return
+    detail_status = _goto_server_detail(sb)
+    if detail_status == "not_due":
+        return True
+    if detail_status != "ready":
+        return False
     if not _open_renew_modal(sb):
-        return
+        return False
     _submit_first_renew(sb)
     _confirm_second_renew(sb)
-    _check_renew_result(sb)
+    return _check_renew_result(sb)
 
 def _run_account(sb_kwargs, email, pwd) -> bool:
     global CURRENT_EMAIL
@@ -592,20 +590,14 @@ def _run_account(sb_kwargs, email, pwd) -> bool:
     print("🚀 启动浏览器...")
     try:
         with SB(**sb_kwargs) as sb:
-            try:
-                sb.open("https://api.ip.sb/ip")
-                print(f"📍  当前出口IP: {sb.get_text('body')}")
-            except Exception:
-                pass
             if login(sb, email, pwd):
-                renew_server(sb)
-                return True
+                return renew_server(sb)
             else:
                 print("\n❌ 登录失败，终止该账号续期操作。")
                 send_tg_message("❌", "登录失败", "未知")
                 return False
     except Exception as e:
-        print(f"\n❌ 账号 {email} 处理异常: {e}")
+        print(f"\n❌ 账号 {masked_email(email)} 处理异常: {e}")
         send_tg_message("❌", f"处理异常: {e}", "未知")
         return False
 
@@ -631,7 +623,7 @@ def main():
         email = acc["email"]
         pwd   = acc["password"]
         print("\n" + "=" * 25)
-        print(f"  处理账号 {idx}/{len(ACCOUNTS)}: {email}")
+        print(f"  处理账号 {idx}/{len(ACCOUNTS)}: {masked_email(email)}")
         print("=" * 25)
         acc_ok = False
         for attempt in range(1, max_attempts + 1):
@@ -644,7 +636,7 @@ def main():
         if acc_ok:
             ok_count += 1
         else:
-            print(f"❌ 账号 {email} 所有节点尝试均失败")
+            print(f"❌ 账号 {masked_email(email)} 所有节点尝试均失败")
             send_tg_message("❌", "节点尝试均失败", f"{max_attempts} 次不同代理节点")
     print("\n" + "#" * 25)
     print(f"  全部账号处理完毕: {ok_count}/{len(ACCOUNTS)} 成功")
